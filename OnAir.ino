@@ -15,11 +15,11 @@
 
 
 // Client ID
-const String clientID = "1385b487-9035-4609-bc4c-8855b7368b4c";
+const String clientID = "d25a7a02-b95a-45c7-80c4-8a2cac95c002";
 // Tenant ID
-const String tenantID = "72f988bf-86f1-41af-91ab-2d7cd011db47";
+const String tenantID = "777fd943-bc3b-456c-afff-41f772edc972";
 // Scopes Required
-const String scopes = "&scope=user.read%20presence.read";
+const String scopes = "&scope=user.read%20presence.read%20offline_access";
 
 // WIFI username/password
 String ssid = "";
@@ -101,7 +101,7 @@ void getDeviceCode(WiFiClientSecure& client, HTTPClient& http) {
   // Create request body
   String body = String("client_id=" + clientID + scopes);
 
-  StaticJsonDocument<768> doc;
+  DynamicJsonDocument doc(768);
 
   http.begin(client, String("https://login.microsoftonline.com/" + tenantID + "/oauth2/v2.0/devicecode"));
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
@@ -146,6 +146,8 @@ void getDeviceCode(WiFiClientSecure& client, HTTPClient& http) {
         Serial.println(verificationURL);
 
         // TBD: Show it on the LCD
+
+        waitForUserAuth(client, http);
       }
     } else {
       // In case some other error code
@@ -155,6 +157,67 @@ void getDeviceCode(WiFiClientSecure& client, HTTPClient& http) {
     Serial.printf("Device Code - POST - Failed!, error: %s\n", http.errorToString(httpCode).c_str());
   }
   http.end();
+}
+
+void waitForUserAuth(WiFiClientSecure& client, HTTPClient& http) {
+  static bool isPending = true;
+  String body = String("grant_type=urn:ietf:params:oauth:grant-type:device_code&client_id=" + clientID + "&device_code=" + deviceCode);
+  DynamicJsonDocument doc(4096);
+
+  while (expiresIn > 0 && isPending) {
+    // Delay the calls
+    delay(authInterval * 1000);
+    
+    // Reduce the expires time
+    expiresIn -= authInterval;
+    
+    // Wait for users authtoken
+    http.begin(client, String("https://login.microsoftonline.com/" + tenantID + "/oauth2/v2.0/token"));
+    http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+    Serial.println("Device Auth - POST");
+    // start connection and send HTTP header
+    int httpCode = http.POST(body);
+    if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_BAD_REQUEST) {
+      String payload = http.getString();
+      Serial.println(payload);
+      // Deserialize the JSON document
+      DeserializationError error = deserializeJson(doc, payload);
+      if (error) {
+        Serial.printf("Failed to parse payload");
+        isPending = false;
+      } else {
+        if (doc.containsKey("error")) {
+          String errorCode = doc["error"].as<String>();
+          if (errorCode != "authorization_pending") {
+            Serial.print("Device Auth - POST - Authorization failed:");
+            Serial.println(errorCode);
+            isPending = false;
+          } else {
+            Serial.print("Device Auth - POST - Authorization pending:");
+            Serial.println(errorCode);
+          }
+        } else {
+          authToken = doc["access_token"].as<String>();
+          refreshToken = doc["refresh_token"].as<String>();
+          expiresIn = doc["expires_in"].as<int>();
+          isPending = false;
+        }
+      }
+    } else {
+      // In case some other error code
+      Serial.printf("Device Auth - POST - Code: %d\n", httpCode);
+      isPending = false;
+    }
+    http.end();
+  }
+
+  // Check if authtoken and refresh token is set
+  if (authToken == "" && refreshToken == "") {
+    // Restart the auth flow
+    getDeviceCode(client, http);
+    return;
+  }
 }
 
 // Setup the essentials for your circuit to work. It runs first every time your circuit is powered with electricity.
@@ -172,25 +235,28 @@ void setup()
 
   // Load config file
   loadConfiguration(SDFILE_NAME);
-
+  
   // Start WIFI connection
   startWifiConnection();
-
+  
   // Create client instance
   WiFiClientSecure client;
+  
   // ignore SSL certificate
   client.setInsecure();
+  
   // HTTP Client instance
   HTTPClient http;
-
+  
   // Get Device Code
   getDeviceCode(client, http);
-
 }
 
 // Main logic of your circuit. It defines the interaction between the components you selected. After setup, it runs over and over again, in an eternal loop.
 void loop()
 {
-
-
+  Serial.println(authToken);
+  Serial.println(refreshToken);
+  Serial.println(expiresIn);
+  delay(30 * 1000);
 }
