@@ -489,7 +489,7 @@ void setup()
   while (!SD.begin(SDFILE_PIN_CS))
   {
     Serial.println("Failed to initialize SD library");
-    displayError("Failed to initialize SD library", 1000);
+    displayErrorMessage("Failed to initialize SD library");
   }
 
 
