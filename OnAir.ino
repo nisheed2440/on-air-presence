@@ -1,15 +1,20 @@
-
 // Include Libraries
 #include <SPI.h>
 #include <SD.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
-#include <WiFiClientSecureBearSSL.h>
 #include <ArduinoJson.h>
+#include <Fonts/FreeMonoBold9pt7b.h>
 
 // Pin Definitions
-#define SDFILE_PIN_CS D3
-#define LED D4
+#define SDFILE_PIN_CS D8
+#define LED D0
+// Screen Definitions
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
 /**
     Constants
 */
@@ -18,6 +23,7 @@ const char CLIENT_ID[] = "d25a7a02-b95a-45c7-80c4-8a2cac95c002";
 const char TENANT_ID[] = "777fd943-bc3b-456c-afff-41f772edc972";
 const char SCOPES[] = "&scope=user.read%20presence.read%20offline_access";
 const int POLLING_INTERVAL = 15;
+const int POLLING_TIMEOUT = 600;
 
 /**
    Variables
@@ -35,6 +41,93 @@ int expiresIn = 0;
 String authToken = "";
 String refreshToken = "";
 
+// Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+void initializeDisplay() {
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("SSD1306 allocation failed");
+    for (;;);
+  }
+  // Wait for 2s
+  delay(2000);
+
+  // Clear the buffer.
+  display.clearDisplay();
+
+  // Set the display text color to white
+  display.setTextColor(WHITE);
+
+  // Set the default text size
+  display.setTextSize(1);
+}
+
+void drawCentreString(const String buf, int x, int y)
+{
+  int16_t x1, y1;
+  uint16_t w, h;
+  display.getTextBounds(buf, x, y, &x1, &y1, &w, &h); //calc width of new string
+  display.setCursor(x - w / 2, y);
+  display.print(buf);
+}
+
+void displayInfoMessage(const String message) {
+  display.clearDisplay();
+  drawCentreString("INFO:", SCREEN_WIDTH / 2, 5);
+  display.setCursor(0, 20);
+  display.print(message);
+  display.display();
+}
+
+void displayErrorMessage(const String message) {
+  display.clearDisplay();
+  drawCentreString("ERROR:", SCREEN_WIDTH / 2, 5);
+  display.setCursor(0, 20);
+  display.print(message);
+  display.display();
+}
+
+
+void displayUserCode(String code) {
+  display.clearDisplay();
+  drawCentreString("GO TO:", SCREEN_WIDTH / 2, 6);
+  display.setCursor(10, 18);
+  display.print("aka.ms/devicelogin");
+  drawCentreString("AND ENTER:", SCREEN_WIDTH / 2, 30);
+  display.setTextSize(2);
+  display.setCursor(10, 42);
+  display.print(code);
+  display.setTextSize(1);
+  display.display();
+}
+
+void displayInfo(String info, bool clear = false, bool show = false, int persistFor = 0) {
+  if (clear) {
+    display.clearDisplay();
+    display.setCursor(0, 10);
+    display.println("Info:\n");
+  }
+  display.setCursor(0, 20);
+  display.println(info);
+  if (show) {
+    display.display();
+    delay(persistFor);
+    display.clearDisplay();
+    display.display();
+  }
+}
+
+void displayError(String error, int persistFor = 0) {
+  display.clearDisplay();
+  display.setCursor(0, 10);
+  display.println(String("Error:\n" + error));
+  display.display();
+  delay(persistFor);
+  display.clearDisplay();
+  display.display();
+}
+
 // Loads the configuration from a file
 void loadConfiguration(const char *filename)
 {
@@ -45,6 +138,8 @@ void loadConfiguration(const char *filename)
   int lineNumsOfInterest = 2;
 
   Serial.println("Loading config file...");
+  displayInfoMessage("Loading config file...");
+  delay(2000);
 
   // Loop through the file data
   while (file.available())
@@ -78,8 +173,9 @@ void loadConfiguration(const char *filename)
   file.close();
 
   // Print the new values of username and password
-  Serial.println(String("SSID: " + ssid));
-  Serial.println(String("Password: " + password));
+  Serial.println(String("SSID: " + ssid) + "\n" + String("Password: " + password));
+  displayInfoMessage(String("SSID: " + ssid) + "\nPassword: *******");
+  delay(2000);
 }
 
 // starts a WIFI connection based on the ssid/password from the SD card
@@ -90,32 +186,42 @@ void startWifiConnection()
   // Start connecting
   WiFi.begin(ssid, password);
 
-  Serial.print("Starting WIFI connection...");
+  Serial.print("Starting WIFI connection!");
+  displayInfoMessage("Starting WIFI connection!");
+  delay(2000);
 
   while (WiFi.status() != WL_CONNECTED)
   {
-    delay(500);
     Serial.print(".");
+    displayInfoMessage("Connecting...");
   }
 
   Serial.println("");
-  Serial.println("WiFi connected!");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
+  Serial.println(String("WiFi connected!\nIP address:\n" + WiFi.localIP().toString()));
+  displayInfoMessage(String("WiFi connected!\nIP address:\n" + WiFi.localIP().toString()));
+  delay(4000);
 }
 
-void getDeviceCode(WiFiClientSecure &client, HTTPClient &http)
+void getDeviceCode()
 {
 
+  // Create client instance
+  WiFiClientSecure client;
+  // ignore SSL certificate
+  client.setInsecure();
+  // HTTP Client instance
+  HTTPClient http;
+  
   DynamicJsonDocument doc(1024);
 
   // Create request body
   String body = "client_id=" + String(CLIENT_ID) + String(SCOPES);
-
+  http.useHTTP10(true);
   http.begin(client, "https://login.microsoftonline.com/" + String(TENANT_ID) + "/oauth2/v2.0/devicecode");
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
 
   Serial.println("Device Code - POST");
+  displayInfoMessage("Getting device code...");
 
   // start connection and send HTTP header
   int httpCode = http.POST(body);
@@ -126,12 +232,17 @@ void getDeviceCode(WiFiClientSecure &client, HTTPClient &http)
     // HTTP header has been send and Server response header has been handled
     if (httpCode == HTTP_CODE_OK)
     {
-      String payload = http.getString();
+      Serial.println("Recieved data!");
+      displayInfoMessage("Recieved data!");
+      delay(2000);
+
       // Deserialize the JSON document
-      DeserializationError error = deserializeJson(doc, payload);
+      DeserializationError error = deserializeJson(doc, http.getStream());
       if (error)
       {
-        Serial.printf("Failed to parse payload");
+        Serial.println("Failed to parse payload!");
+        displayErrorMessage("Failed to parse payload!");
+        delay(2000);
       }
       else
       {
@@ -159,8 +270,7 @@ void getDeviceCode(WiFiClientSecure &client, HTTPClient &http)
         Serial.print("Verification URL: ");
         Serial.println(verificationURL);
 
-        // TBD: Show it on the LCD
-
+        displayUserCode(userCode);
         waitForUserAuth(client, http);
       }
     }
@@ -168,30 +278,41 @@ void getDeviceCode(WiFiClientSecure &client, HTTPClient &http)
     {
       // In case some other error code
       Serial.printf("Device Code - POST - Code: %d\n", httpCode);
+      displayErrorMessage("Getting device code - Failed");
     }
   }
   else
   {
     Serial.printf("Device Code - POST - Failed!, error: %s\n", http.errorToString(httpCode).c_str());
+    displayErrorMessage("Getting device code - Failed");
   }
   http.end();
+
+  // Check if authtoken and refresh token is set
+  if (authToken == "" && refreshToken == "")
+  {
+    // Restart the auth flow
+    Serial.printf("Restarting device authorization!");
+    displayInfoMessage("Restarting device authorization!");
+    delay(1000);
+    getDeviceCode();
+  }
 }
 
 void waitForUserAuth(WiFiClientSecure &client, HTTPClient &http)
 {
   static bool isPending = true;
-  String body = "grant_type=urn:ietf:params:oauth:grant-type:device_code&client_id=" + String(CLIENT_ID) + "&device_code=" + deviceCode;
+  String body =  "grant_type=urn:ietf:params:oauth:grant-type:device_code&client_id=" + String(CLIENT_ID) + "&device_code=" + deviceCode;
+
   DynamicJsonDocument doc(4096);
 
   while (expiresIn > 0 && isPending)
   {
-    // Delay the calls
-    delay(authInterval * 1000);
-
     // Reduce the expires time
     expiresIn -= authInterval;
 
     // Wait for users authtoken
+    http.useHTTP10(true);
     http.begin(client, "https://login.microsoftonline.com/" + String(TENANT_ID) + "/oauth2/v2.0/token");
     http.addHeader("Content-Type", "application/x-www-form-urlencoded");
 
@@ -200,13 +321,11 @@ void waitForUserAuth(WiFiClientSecure &client, HTTPClient &http)
     int httpCode = http.POST(body);
     if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_BAD_REQUEST)
     {
-      String payload = http.getString();
-      Serial.println(payload);
       // Deserialize the JSON document
-      DeserializationError error = deserializeJson(doc, payload);
+      DeserializationError error = deserializeJson(doc, http.getStream());
       if (error)
       {
-        Serial.printf("Failed to parse payload");
+        Serial.println("Failed to parse payload");
         isPending = false;
       }
       else
@@ -216,18 +335,23 @@ void waitForUserAuth(WiFiClientSecure &client, HTTPClient &http)
           String errorCode = doc["error"].as<String>();
           if (errorCode != "authorization_pending")
           {
-            Serial.print("Device Auth - POST - Authorization failed:");
+            Serial.print("Device authorization failed:");
             Serial.println(errorCode);
+            displayErrorMessage("Device authorization failed!");
+            delay(2000);
             isPending = false;
           }
           else
           {
-            Serial.print("Device Auth - POST - Authorization pending:");
+            Serial.print("Device authorization pending:");
             Serial.println(errorCode);
           }
         }
         else
         {
+          Serial.print("Device authorization successful!");
+          displayInfoMessage("Device authorization successful!");
+          delay(2000);
           authToken = doc["access_token"].as<String>();
           refreshToken = doc["refresh_token"].as<String>();
           expiresIn = doc["expires_in"].as<int>();
@@ -239,17 +363,80 @@ void waitForUserAuth(WiFiClientSecure &client, HTTPClient &http)
     {
       // In case some other error code
       Serial.printf("Device Auth - POST - Code: %d\n", httpCode);
+      displayErrorMessage("Device authorization failed!");
+      delay(2000);
       isPending = false;
     }
-    http.end();
+    // Delay the calls
+    delay(authInterval * 1000);
   }
+}
 
-  // Check if authtoken and refresh token is set
-  if (authToken == "" && refreshToken == "")
+
+void refreshAuthToken()
+{
+
+  // Create client instance
+  WiFiClientSecure client;
+  // ignore SSL certificate
+  client.setInsecure();
+  // HTTP Client instance
+  HTTPClient http;
+
+  String body = "grant_type=refresh_token&client_id=" + String(CLIENT_ID) + "&refresh_token=" + refreshToken;
+
+  DynamicJsonDocument doc(4096);
+
+  // Wait for users authtoken
+  http.useHTTP10(true);
+  http.begin(client, "https://login.microsoftonline.com/" + String(TENANT_ID) + "/oauth2/v2.0/token");
+  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+  Serial.println("Refresh Auth Token - POST");
+  displayInfoMessage("Refreshing auth token...");
+  // start connection and send HTTP header
+  int httpCode = http.POST(body);
+  if (httpCode == HTTP_CODE_OK)
   {
-    // Restart the auth flow
-    getDeviceCode(client, http);
+    Serial.println("Recieved data!");
+    // Deserialize the JSON document
+    DeserializationError error = deserializeJson(doc, http.getStream());
+    if (error)
+    {
+      Serial.println("Failed to parse payload");
+      displayErrorMessage("Failed to parse payload!");
+    }
+    else
+    {
+      if (doc.containsKey("error"))
+      {
+        String errorCode = doc["error"].as<String>();
+        Serial.print("Device Auth - POST - Authorization failed:");
+        Serial.println(errorCode);
+        displayErrorMessage("Refreshing auth token failed!");
+      }
+      else
+      {
+        displayInfoMessage("Refreshing auth token successful!");
+        authToken = doc["access_token"].as<String>();
+        refreshToken = doc["refresh_token"].as<String>();
+        expiresIn = doc["expires_in"].as<int>();
+        Serial.print("Auth Token: ");
+        Serial.println(authToken);
+        Serial.print("Refresh Token: ");
+        Serial.println(refreshToken);
+        Serial.print("Expires In: ");
+        Serial.println(expiresIn);
+      }
+    }
   }
+  else
+  {
+    // In case some other error code
+    Serial.printf("Device Auth - POST - Code: %d\n", httpCode);
+    displayErrorMessage("Refreshing auth token failed!");
+  }
+  http.end();
 }
 
 JsonObject getPresence()
@@ -265,15 +452,15 @@ JsonObject getPresence()
     client.setInsecure();
     // HTTP Client instance
     HTTPClient http;
+    http.useHTTP10(true);
     http.begin(client, "https://graph.microsoft.com/v1.0/me/presence");
     http.addHeader("Authorization", "Bearer " + authToken);
+
     int httpCode = http.GET();
     if (httpCode == HTTP_CODE_OK)
     {
-      String payload = http.getString();
-      Serial.print(payload);
       // Deserialize the JSON document
-      DeserializationError error = deserializeJson(doc, payload);
+      DeserializationError error = deserializeJson(doc, http.getStream());
       if (error)
       {
         errorStr = "Presence GET - Parse Error";
@@ -294,7 +481,10 @@ JsonObject getPresence()
 
   JsonObject result = doc.as<JsonObject>();
 
-  if (errorStr != "") {
+
+
+  if (errorStr != "")
+  {
     result["error"] = errorStr;
   }
 
@@ -306,18 +496,22 @@ void setup()
 {
   // initialize GPIO 16 as an output
   pinMode(LED, OUTPUT);
-  
+
   // Open serial communications and wait for port to open:
   Serial.begin(9600);
   while (!Serial)
     ;
 
+  // Initialize Display
+  initializeDisplay();
+
   // Initialize SD library
   while (!SD.begin(SDFILE_PIN_CS))
   {
     Serial.println("Failed to initialize SD library");
-    delay(1000);
+    displayError("Failed to initialize SD library", 1000);
   }
+
 
   // Load config file
   loadConfiguration(FILE_NAME);
@@ -327,17 +521,10 @@ void setup()
     // Start WIFI connection
     startWifiConnection();
 
-    // Create client instance
-    WiFiClientSecure client;
-
-    // ignore SSL certificate
-    client.setInsecure();
-
-    // HTTP Client instance
-    HTTPClient http;
-
     // Get Device Code
-    getDeviceCode(client, http);
+    getDeviceCode();
+  } else {
+    displayErrorMessage("Unable to find Wifi ssid or password");
   }
 }
 
@@ -346,24 +533,36 @@ void loop()
 {
   if (authToken != "" && refreshToken != "")
   {
-    while (expiresIn > 0)
+    while (expiresIn > POLLING_TIMEOUT)
     {
-      expiresIn -= POLLING_INTERVAL;
       JsonObject presence = getPresence();
+
       if (!presence.containsKey("error"))
       {
+        Serial.print(presence["activity"].as<String>());
         String activity = presence["activity"].as<String>();
-        if (activity == "DoNotDisturb" ||  activity == "InACall" || activity == "InAConferenceCall" || activity == "InAMeeting" || activity == "Presenting") {
-          Serial.println("Turn On Air signal!");
+        if (activity == "DoNotDisturb" || activity == "InACall" || activity == "InAConferenceCall" || activity == "InAMeeting" || activity == "Presenting")
+        {
+          Serial.println("Turn On On-Air signal!");
           digitalWrite(LED, HIGH);
-        } else {
-          Serial.println("Turn Off Air signal!");
+        }
+        else
+        {
+          Serial.println("Turn Off On-Air signal!");
           digitalWrite(LED, LOW);
         }
+        displayInfoMessage("Activity - " + activity);
+        display.display();
       }
       delay(POLLING_INTERVAL * 1000);
+      expiresIn -= POLLING_INTERVAL;
     }
-
+    // Turn off the LED before getting new token
+    Serial.println("Turn Off On-Air signal!");
+    digitalWrite(LED, LOW);
+    
     // Get new auth token / refresh token here
+    refreshAuthToken();
+    delay(POLLING_INTERVAL * 1000);
   }
 }
