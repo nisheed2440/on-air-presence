@@ -63,6 +63,7 @@ void initializeDisplay() {
   display.setTextSize(1);
 }
 
+// Utility function to center strings on LCD
 void drawCentreString(const String buf, int x, int y)
 {
   int16_t x1, y1;
@@ -72,6 +73,8 @@ void drawCentreString(const String buf, int x, int y)
   display.print(buf);
 }
 
+
+// Utility function to display info messages
 void displayInfoMessage(const String message) {
   display.clearDisplay();
   drawCentreString("INFO:", SCREEN_WIDTH / 2, 5);
@@ -80,6 +83,8 @@ void displayInfoMessage(const String message) {
   display.display();
 }
 
+
+// Utility function to display error messages
 void displayErrorMessage(const String message) {
   display.clearDisplay();
   drawCentreString("ERROR:", SCREEN_WIDTH / 2, 5);
@@ -88,7 +93,7 @@ void displayErrorMessage(const String message) {
   display.display();
 }
 
-
+// Utility function to display user code
 void displayUserCode(String code) {
   display.clearDisplay();
   drawCentreString("GO TO:", SCREEN_WIDTH / 2, 6);
@@ -99,32 +104,6 @@ void displayUserCode(String code) {
   display.setCursor(10, 42);
   display.print(code);
   display.setTextSize(1);
-  display.display();
-}
-
-void displayInfo(String info, bool clear = false, bool show = false, int persistFor = 0) {
-  if (clear) {
-    display.clearDisplay();
-    display.setCursor(0, 10);
-    display.println("Info:\n");
-  }
-  display.setCursor(0, 20);
-  display.println(info);
-  if (show) {
-    display.display();
-    delay(persistFor);
-    display.clearDisplay();
-    display.display();
-  }
-}
-
-void displayError(String error, int persistFor = 0) {
-  display.clearDisplay();
-  display.setCursor(0, 10);
-  display.println(String("Error:\n" + error));
-  display.display();
-  delay(persistFor);
-  display.clearDisplay();
   display.display();
 }
 
@@ -372,7 +351,7 @@ void waitForUserAuth(WiFiClientSecure &client, HTTPClient &http)
   }
 }
 
-
+// Get the new auth token based on refresh token
 void refreshAuthToken()
 {
 
@@ -439,6 +418,7 @@ void refreshAuthToken()
   http.end();
 }
 
+// Get the users presence
 JsonObject getPresence()
 {
   DynamicJsonDocument doc(512);
@@ -563,6 +543,5 @@ void loop()
     
     // Get new auth token / refresh token here
     refreshAuthToken();
-    delay(POLLING_INTERVAL * 1000);
   }
 }
